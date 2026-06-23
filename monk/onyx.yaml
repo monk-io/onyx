@@ -1,0 +1,447 @@
+namespace: onyx
+
+api-base:
+  defines: runnable
+  metadata:
+    name: Onyx API
+    description: |
+      Reusable Onyx API component. It runs the public onyxdotapp/onyx-backend image and expects inheriting templates to provide PostgreSQL connection details. Standard RAG deployments also need OpenSearch, Redis, and object storage connections; use the self-hosted postgresql/db-v15, opensearch/single-node, redis/redis, and minio/minio-server packages or compatible hosted services when inheriting this runnable.
+    tags: onyx, ai-chat, rag, enterprise-search, api, component
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    backend-image-tag:
+      type: string
+      value: latest
+      description: Public onyxdotapp/onyx-backend Docker image tag to run.
+    api-port:
+      type: int
+      env: API_PORT
+      value: 8080
+      description: HTTP port used by the Onyx API inside the container.
+    auth-type:
+      type: string
+      env: AUTH_TYPE
+      value: basic
+      description: Onyx authentication mode.
+    user-auth-secret:
+      type: string
+      env: USER_AUTH_SECRET
+      value: ""
+      description: Sensitive cookie, reset-token, OAuth-state, and captcha signing secret. Inheriting templates must set this to a generated value or read it with secret("onyx-user-auth-secret").
+    postgres-host:
+      type: string
+      env: POSTGRES_HOST
+      value: ""
+      description: PostgreSQL hostname. Inheriting templates set this from connection-hostname("postgres").
+    postgres-port:
+      type: int
+      env: POSTGRES_PORT
+      value: 5432
+      description: PostgreSQL port. Inheriting templates set this from connection-port("postgres").
+    postgres-user:
+      type: string
+      env: POSTGRES_USER
+      value: onyx
+      description: PostgreSQL user for Onyx metadata and durable application state.
+    postgres-db:
+      type: string
+      env: POSTGRES_DB
+      value: onyx
+      description: PostgreSQL database for Onyx metadata and durable application state.
+    postgres-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: ""
+      description: Sensitive PostgreSQL password. Inheriting templates must set this to match the connected database, normally with secret("onyx-postgres-password").
+    disable-vector-db:
+      type: string
+      env: DISABLE_VECTOR_DB
+      value: "true"
+      description: Set to true for Lite mode without OpenSearch indexing; set to false for Standard deployments.
+    cache-backend:
+      type: string
+      env: CACHE_BACKEND
+      value: postgres
+      description: Cache backend. Lite mode uses postgres; Standard deployments use redis.
+    auth-backend:
+      type: string
+      env: AUTH_BACKEND
+      value: postgres
+      description: Authentication state backend. Lite mode uses postgres; Standard deployments usually use redis.
+    file-store-backend:
+      type: string
+      env: FILE_STORE_BACKEND
+      value: postgres
+      description: File storage backend. Lite mode uses postgres; Standard deployments usually use s3-compatible object storage.
+    redis-host:
+      type: string
+      env: REDIS_HOST
+      value: ""
+      description: Redis hostname for Standard deployments. Inheriting templates set this from connection-hostname("redis").
+    redis-port:
+      type: int
+      env: REDIS_PORT
+      value: 6379
+      description: Redis port for Standard deployments. Inheriting templates set this from connection-port("redis").
+    redis-password:
+      type: string
+      env: REDIS_PASSWORD
+      value: ""
+      description: Sensitive Redis password for protected Redis deployments. Inheriting templates that enable Redis AUTH must set this with secret("onyx-redis-password") or the same generated value used by the Redis runnable.
+    opensearch-host:
+      type: string
+      env: OPENSEARCH_HOST
+      value: ""
+      description: OpenSearch hostname for Standard retrieval/indexing deployments. Inheriting templates set this from connection-hostname("opensearch").
+    opensearch-port:
+      type: int
+      env: OPENSEARCH_REST_API_PORT
+      value: 9200
+      description: OpenSearch REST API port for Standard retrieval/indexing deployments.
+    opensearch-use-ssl:
+      type: string
+      env: OPENSEARCH_USE_SSL
+      value: "false"
+      description: Whether the OpenSearch client should use HTTPS.
+    opensearch-admin-username:
+      type: string
+      env: OPENSEARCH_ADMIN_USERNAME
+      value: admin
+      description: OpenSearch admin username when the connected OpenSearch endpoint requires authentication.
+    opensearch-admin-password:
+      type: string
+      env: OPENSEARCH_ADMIN_PASSWORD
+      value: ""
+      description: Sensitive OpenSearch admin password. Inheriting templates with secured OpenSearch must set this with secret("onyx-opensearch-password") or the same generated value used by OpenSearch.
+    model-server-host:
+      type: string
+      env: MODEL_SERVER_HOST
+      value: ""
+      description: Inference model server hostname. Standard local-model deployments set this from connection-hostname("inference-model").
+    model-server-port:
+      type: int
+      env: MODEL_SERVER_PORT
+      value: 9000
+      description: Inference model server port.
+    indexing-model-server-host:
+      type: string
+      env: INDEXING_MODEL_SERVER_HOST
+      value: ""
+      description: Indexing model server hostname. Standard local-model deployments set this from connection-hostname("indexing-model").
+    s3-endpoint-url:
+      type: string
+      env: S3_ENDPOINT_URL
+      value: ""
+      description: S3-compatible object storage URL, for example a MinIO service URL built from Monk connection details.
+    s3-access-key:
+      type: string
+      env: S3_AWS_ACCESS_KEY_ID
+      value: ""
+      description: Sensitive S3 access key. Inheriting Standard templates must set this with secret("onyx-s3-access-key") or the same generated value used by MinIO.
+    s3-secret-key:
+      type: string
+      env: S3_AWS_SECRET_ACCESS_KEY
+      value: ""
+      description: Sensitive S3 secret key. Inheriting Standard templates must set this with secret("onyx-s3-secret-key") or the same generated value used by MinIO.
+    s3-bucket-name:
+      type: string
+      env: S3_FILE_STORE_BUCKET_NAME
+      value: onyx-file-store-bucket
+      description: S3-compatible bucket name used by Onyx file storage.
+    enable-craft:
+      type: string
+      env: ENABLE_CRAFT
+      value: "false"
+      description: Whether to enable Onyx Craft sandbox features. Keep disabled unless Docker or Kubernetes sandbox infrastructure is intentionally added.
+    log-level:
+      type: string
+      env: LOG_LEVEL
+      value: info
+      description: Onyx backend log level.
+    api-log-volume-name:
+      type: string
+      value: onyx-api-logs
+      description: Monk volume subdirectory used for API logs.
+    file-system-volume-name:
+      type: string
+      value: onyx-file-system
+      description: Monk volume subdirectory used for optional filesystem-backed Onyx files.
+  containers:
+    api:
+      image: onyxdotapp/onyx-backend
+      image-tag: <- $backend-image-tag
+      restart: unless-stopped
+      bash: |
+        /bin/sh -ec '
+        alembic upgrade head
+        exec uvicorn onyx.main:app --host 0.0.0.0 --port "$API_PORT"
+        '
+      paths:
+        - <- `${volume-path}/${api-log-volume-name}:/var/log/onyx`
+        - <- `${volume-path}/${file-system-volume-name}:/app/file-system`
+  services:
+    api:
+      container: api
+      port: <- $api-port
+      protocol: tcp
+      description: Private Onyx API HTTP endpoint.
+  checks:
+    readiness:
+      attempts: 120
+      initialDelay: 20
+      period: 5
+      code: >-
+        <- `exec("api", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)")`
+
+web-base:
+  defines: runnable
+  metadata:
+    name: Onyx Web
+    description: |
+      Reusable Onyx Next.js web component. It runs the public onyxdotapp/onyx-web-server image and expects inheriting templates to provide an Onyx API connection named api.
+    tags: onyx, ai-chat, rag, enterprise-search, web, nextjs, component
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    web-image-tag:
+      type: string
+      value: latest
+      description: Public onyxdotapp/onyx-web-server Docker image tag to run.
+    web-port:
+      type: int
+      env: WEB_PORT
+      value: 3000
+      description: HTTP port used by the Onyx web server inside the container.
+    internal-url:
+      type: string
+      env: INTERNAL_URL
+      value: ""
+      description: Internal URL of the Onyx API service. Inheriting templates build this from the api Monk connection.
+  containers:
+    web:
+      image: onyxdotapp/onyx-web-server
+      image-tag: <- $web-image-tag
+      restart: unless-stopped
+  services:
+    http:
+      container: web
+      port: <- $web-port
+      protocol: tcp
+      description: Onyx browser UI endpoint.
+
+background-base:
+  defines: runnable
+  metadata:
+    name: Onyx Background Workers
+    description: |
+      Reusable Onyx background worker component for Standard deployments. It runs the public onyxdotapp/onyx-backend image and expects PostgreSQL, OpenSearch, Redis, MinIO/S3, inference-model, and indexing-model connections from inheriting templates.
+    tags: onyx, celery, workers, rag, enterprise-search, component
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    backend-image-tag:
+      type: string
+      value: latest
+      description: Public onyxdotapp/onyx-backend Docker image tag to run.
+    file-store-backend:
+      type: string
+      env: FILE_STORE_BACKEND
+      value: s3
+      description: File storage backend used by background workers.
+    postgres-host:
+      type: string
+      env: POSTGRES_HOST
+      value: ""
+      description: PostgreSQL hostname from the Monk postgres connection.
+    postgres-port:
+      type: int
+      env: POSTGRES_PORT
+      value: 5432
+      description: PostgreSQL port from the Monk postgres connection.
+    postgres-user:
+      type: string
+      env: POSTGRES_USER
+      value: onyx
+      description: PostgreSQL user for Onyx workers.
+    postgres-db:
+      type: string
+      env: POSTGRES_DB
+      value: onyx
+      description: PostgreSQL database for Onyx workers.
+    postgres-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: ""
+      description: Sensitive PostgreSQL password. Inheriting templates must set this to match the database, normally with secret("onyx-postgres-password").
+    redis-host:
+      type: string
+      env: REDIS_HOST
+      value: ""
+      description: Redis hostname from the Monk redis connection.
+    redis-port:
+      type: int
+      env: REDIS_PORT
+      value: 6379
+      description: Redis port from the Monk redis connection.
+    redis-password:
+      type: string
+      env: REDIS_PASSWORD
+      value: ""
+      description: Sensitive Redis password for protected Redis deployments.
+    opensearch-host:
+      type: string
+      env: OPENSEARCH_HOST
+      value: ""
+      description: OpenSearch hostname from the Monk opensearch connection.
+    opensearch-port:
+      type: int
+      env: OPENSEARCH_REST_API_PORT
+      value: 9200
+      description: OpenSearch REST API port.
+    opensearch-use-ssl:
+      type: string
+      env: OPENSEARCH_USE_SSL
+      value: "false"
+      description: Whether workers connect to OpenSearch over HTTPS.
+    opensearch-admin-username:
+      type: string
+      env: OPENSEARCH_ADMIN_USERNAME
+      value: admin
+      description: OpenSearch admin username.
+    opensearch-admin-password:
+      type: string
+      env: OPENSEARCH_ADMIN_PASSWORD
+      value: ""
+      description: Sensitive OpenSearch admin password for secured OpenSearch deployments.
+    model-server-host:
+      type: string
+      env: MODEL_SERVER_HOST
+      value: ""
+      description: Inference model server hostname from the Monk connection.
+    indexing-model-server-host:
+      type: string
+      env: INDEXING_MODEL_SERVER_HOST
+      value: ""
+      description: Indexing model server hostname from the Monk connection.
+    s3-endpoint-url:
+      type: string
+      env: S3_ENDPOINT_URL
+      value: ""
+      description: S3-compatible object storage URL.
+    s3-access-key:
+      type: string
+      env: S3_AWS_ACCESS_KEY_ID
+      value: ""
+      description: Sensitive S3 access key shared with MinIO or another S3-compatible backend.
+    s3-secret-key:
+      type: string
+      env: S3_AWS_SECRET_ACCESS_KEY
+      value: ""
+      description: Sensitive S3 secret key shared with MinIO or another S3-compatible backend.
+    s3-bucket-name:
+      type: string
+      env: S3_FILE_STORE_BUCKET_NAME
+      value: onyx-file-store-bucket
+      description: S3-compatible bucket name used by Onyx file storage.
+    api-server-protocol:
+      type: string
+      env: API_SERVER_PROTOCOL
+      value: http
+      description: Protocol used by worker integrations when calling the Onyx API.
+    api-server-host:
+      type: string
+      env: API_SERVER_HOST
+      value: ""
+      description: Onyx API hostname from the Monk api connection.
+    enable-craft:
+      type: string
+      env: ENABLE_CRAFT
+      value: "false"
+      description: Whether to enable Onyx Craft worker behavior.
+    background-log-volume-name:
+      type: string
+      value: onyx-background-logs
+      description: Monk volume subdirectory used for background worker logs.
+    file-system-volume-name:
+      type: string
+      value: onyx-file-system
+      description: Monk volume subdirectory used for optional filesystem-backed Onyx files.
+  containers:
+    background:
+      image: onyxdotapp/onyx-backend
+      image-tag: <- $backend-image-tag
+      restart: unless-stopped
+      bash: |
+        /bin/sh -ec '
+        exec /app/scripts/supervisord_entrypoint.sh
+        '
+      paths:
+        - <- `${volume-path}/${background-log-volume-name}:/var/log/onyx`
+        - <- `${volume-path}/${file-system-volume-name}:/app/file-system`
+
+model-server-base:
+  defines: runnable
+  metadata:
+    name: Onyx Model Server
+    description: |
+      Reusable Onyx model server component. It runs the public onyxdotapp/onyx-model-server image for local embedding and inference support in Standard deployments.
+    tags: onyx, model-server, embeddings, inference, component
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    model-image-tag:
+      type: string
+      value: latest
+      description: Public onyxdotapp/onyx-model-server Docker image tag to run.
+    model-port:
+      type: int
+      env: MODEL_SERVER_PORT
+      value: 9000
+      description: HTTP API port used by the model server inside the container.
+    indexing-only:
+      type: string
+      env: INDEXING_ONLY
+      value: "False"
+      description: Set to True for the indexing-only model server.
+    model-cache-volume-name:
+      type: string
+      value: onyx-model-cache
+      description: Monk volume subdirectory used for Hugging Face model cache.
+    model-log-volume-name:
+      type: string
+      value: onyx-model-logs
+      description: Monk volume subdirectory used for model server logs.
+  containers:
+    model:
+      image: onyxdotapp/onyx-model-server
+      image-tag: <- $model-image-tag
+      restart: unless-stopped
+      bash: |
+        /bin/sh -ec '
+        exec uvicorn model_server.main:app --host 0.0.0.0 --port "$MODEL_SERVER_PORT"
+        '
+      paths:
+        - <- `${volume-path}/${model-cache-volume-name}:/app/.cache/huggingface`
+        - <- `${volume-path}/${model-log-volume-name}:/var/log/onyx`
+  services:
+    model:
+      container: model
+      port: <- $model-port
+      protocol: tcp
+      description: Private Onyx model server HTTP endpoint.
+  checks:
+    readiness:
+      attempts: 180
+      initialDelay: 30
+      period: 10
+      code: >-
+        <- `exec("model", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/api/health', timeout=5)")`

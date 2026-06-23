@@ -1,0 +1,153 @@
+namespace: onyx
+
+example-postgres:
+  defines: runnable
+  inherits: postgresql/db-v15
+  metadata:
+    name: Onyx Component Example PostgreSQL
+    description: |
+      PostgreSQL database used by the Onyx component example. It inherits the catalog PostgreSQL package, stays private on the Monk network, and demonstrates the required backing service for Lite Onyx deployments.
+    tags: onyx, postgresql, database, example, local
+    website: https://www.postgresql.org/
+    source: https://github.com/postgres/postgres
+    publisher: monk.io
+    private: false
+  variables:
+    db_user:
+      type: string
+      env: POSTGRES_USER
+      value: onyx
+      description: PostgreSQL user created for the Onyx component example.
+    db_name:
+      type: string
+      env: POSTGRES_DB
+      value: onyx
+      description: PostgreSQL database created for the Onyx component example.
+    db_pass:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: 87a01b463fed4851bb8a5ee864707da0
+      description: Sensitive generated PostgreSQL password shared with the Onyx component example. Inheriting templates that need stable credentials must set this with secret("onyx-postgres-password").
+  services:
+    postgres:
+      container: postgres
+      port: 5432
+      protocol: tcp
+      description: Private PostgreSQL TCP endpoint consumed by the Onyx component example API.
+
+example-api:
+  defines: runnable
+  inherits: onyx/api-base
+  metadata:
+    name: Onyx Component Example API
+    description: |
+      Lite Onyx API example that inherits the reusable API component and wires it to a concrete private PostgreSQL database. Vector search, Redis, MinIO, and background workers are intentionally disabled for a minimal component composition proof.
+    tags: onyx, ai-chat, api, postgresql, example, local
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    user-auth-secret:
+      type: string
+      env: USER_AUTH_SECRET
+      value: 380a3dc81b1a40619867533e2d82040c
+      description: Sensitive generated auth signing secret for the component example. Inheriting templates that need stable credentials must set this with secret("onyx-user-auth-secret").
+    postgres-host:
+      type: string
+      env: POSTGRES_HOST
+      value: <- connection-hostname("postgres")
+      description: PostgreSQL hostname read from the Monk postgres connection.
+    postgres-port:
+      type: int
+      env: POSTGRES_PORT
+      value: <- connection-port("postgres")
+      description: PostgreSQL port read from the Monk postgres connection.
+    postgres-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: 87a01b463fed4851bb8a5ee864707da0
+      description: Sensitive generated PostgreSQL password shared with the component example database.
+    api-log-volume-name:
+      type: string
+      value: onyx-example-api-logs
+      description: Monk volume subdirectory used for component example API logs.
+    file-system-volume-name:
+      type: string
+      value: onyx-example-file-system
+      description: Monk volume subdirectory used for component example optional files.
+  connections:
+    postgres:
+      target: onyx/example-postgres
+      service: postgres
+      description: PostgreSQL connection used by the component example API.
+  depends:
+    wait-for:
+      runnables:
+        - onyx/example-postgres
+      timeout: 240
+
+example-web:
+  defines: runnable
+  inherits: onyx/web-base
+  metadata:
+    name: Onyx Component Example Web
+    description: |
+      Local Onyx web example that connects to the component example API and publishes the browser UI on a non-privileged host port for external verification.
+    tags: onyx, ai-chat, web, nextjs, example, local
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    api-host:
+      type: string
+      value: <- connection-hostname("api")
+      description: API hostname read from the Monk api connection.
+    api-service-port:
+      type: int
+      value: <- connection-port("api")
+      description: API port read from the Monk api connection.
+    internal-url:
+      type: string
+      env: INTERNAL_URL
+      value: <- `http://${api-host}:${api-service-port}`
+      description: Internal Onyx API URL read from the Monk api connection.
+    example-host-port:
+      type: int
+      value: 18300
+      description: Non-privileged host port published by the component example web UI.
+  services:
+    http:
+      container: web
+      port: <- $web-port
+      protocol: tcp
+      publish: true
+      host-port: <- $example-host-port
+      description: Published local Onyx web UI endpoint for component example verification.
+  connections:
+    api:
+      target: onyx/example-api
+      service: api
+      description: Private Onyx API connection used by the component example web server.
+  depends:
+    wait-for:
+      runnables:
+        - onyx/example-api
+      timeout: 420
+
+example:
+  defines: process-group
+  metadata:
+    name: Onyx Component Example
+    description: |
+      Component example that composes the reusable Onyx API and web components with a concrete PostgreSQL backing service. It runs the proven Lite-mode local composition from the standalone template and publishes the local web UI for smoke testing.
+    tags: onyx, ai-chat, postgresql, component, example, local
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  runnable-list:
+    - onyx/postgres-local
+    - onyx/api-local
+    - onyx/web-local
