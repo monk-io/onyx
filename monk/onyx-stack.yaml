@@ -1,0 +1,754 @@
+namespace: onyx
+
+postgres:
+  defines: runnable
+  inherits: postgresql/db-v15
+  metadata:
+    name: Onyx PostgreSQL
+    description: |
+      Production-intended PostgreSQL database for the Onyx standalone stack. It stays private to Monk workloads and stores metadata, chat history, connector state, and durable application data. Inheriting production templates that need stable credentials must set onyx-postgres-password with secret("onyx-postgres-password").
+    tags: onyx, postgresql, database, production
+    website: https://www.postgresql.org/
+    source: https://github.com/postgres/postgres
+    publisher: monk.io
+    private: false
+  variables:
+    db_user:
+      type: string
+      env: POSTGRES_USER
+      value: onyx
+      description: PostgreSQL user created for Onyx.
+    db_name:
+      type: string
+      env: POSTGRES_DB
+      value: onyx
+      description: PostgreSQL database created for Onyx.
+    db_pass:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: 10a637f1a52840fb9d0914eea5ed872f
+      description: Sensitive generated PostgreSQL password shared by the standalone stack. Inheriting templates that need stable credentials must set this with secret("onyx-postgres-password").
+  services:
+    postgres:
+      container: postgres
+      port: 5432
+      protocol: tcp
+      description: Private PostgreSQL TCP endpoint consumed by Onyx services.
+
+postgres-local:
+  defines: runnable
+  inherits: onyx/postgres
+  metadata:
+    name: Onyx PostgreSQL Local
+    description: |
+      Local verification PostgreSQL flavor for the Onyx standalone stack. It uses the same schema as production but is paired with separate local Onyx state volumes.
+    tags: onyx, postgresql, database, local
+    website: https://www.postgresql.org/
+    source: https://github.com/postgres/postgres
+    publisher: monk.io
+    private: false
+  variables:
+    db_pass:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: 7917bc9116ac4b84957e607b6a358fd1
+      description: Sensitive generated PostgreSQL password shared with the local Onyx API.
+
+redis:
+  defines: runnable
+  metadata:
+    name: Onyx Redis
+    description: |
+      Private Redis cache and Celery broker for the Onyx standalone Standard stack. The service is not published publicly. Inheriting production templates that need stable credentials must set onyx-redis-password with secret("onyx-redis-password").
+    tags: onyx, redis, cache, queue, production
+    website: https://redis.io/
+    source: https://github.com/redis/redis
+    publisher: monk.io
+    private: false
+  variables:
+    redis-image-tag:
+      type: string
+      value: 7.4-alpine
+      description: Public Redis Docker image tag to run.
+    redis-port:
+      type: int
+      env: REDIS_PORT
+      value: 6379
+      description: Redis TCP port inside the container.
+    redis-password:
+      type: string
+      env: REDIS_PASSWORD
+      value: 6fe31633100d41459da1b58fbe73b7af
+      description: Sensitive generated Redis AUTH password shared by Onyx services. Inheriting templates that need stable credentials must set this with secret("onyx-redis-password").
+    redis-volume-name:
+      type: string
+      value: onyx-redis
+      description: Monk volume subdirectory used for Redis state.
+  containers:
+    redis:
+      image: redis
+      image-tag: <- $redis-image-tag
+      restart: unless-stopped
+      bash: |
+        /bin/sh -ec '
+        exec redis-server --port "$REDIS_PORT" --save "" --appendonly no --requirepass "$REDIS_PASSWORD"
+        '
+      paths:
+        - <- `${volume-path}/${redis-volume-name}:/data`
+  services:
+    redis:
+      container: redis
+      port: <- $redis-port
+      protocol: tcp
+      description: Private Redis TCP endpoint consumed by Onyx services.
+  checks:
+    readiness:
+      attempts: 30
+      initialDelay: 5
+      period: 5
+      code: >-
+        <- `exec("redis", "/bin/sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping") contains?("PONG")`
+
+opensearch:
+  defines: runnable
+  metadata:
+    name: Onyx OpenSearch
+    description: |
+      Private single-node OpenSearch service for Onyx retrieval and indexing. It is not published publicly; production operators can inherit this runnable to enable OpenSearch security and set onyx-opensearch-password with secret("onyx-opensearch-password").
+    tags: onyx, opensearch, search, retrieval, vector-search, production
+    website: https://opensearch.org/
+    source: https://github.com/opensearch-project/OpenSearch
+    publisher: monk.io
+    private: false
+  variables:
+    opensearch-image-tag:
+      type: string
+      value: 3.6.0
+      description: Public opensearchproject/opensearch Docker image tag used by Onyx.
+    disable-security:
+      type: string
+      env: DISABLE_SECURITY_PLUGIN
+      value: "true"
+      description: Disable OpenSearch security plugin for private Monk-network deployment.
+    discovery-type:
+      type: string
+      env: discovery.type
+      value: single-node
+      description: Run OpenSearch as a single private node.
+    opensearch-java-opts:
+      type: string
+      env: OPENSEARCH_JAVA_OPTS
+      value: -Xms1g -Xmx1g
+      description: JVM heap settings for the private OpenSearch node.
+    opensearch-password:
+      type: string
+      env: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+      value: 9d9fd67f3080435a9cd985988a080c5d
+      description: Sensitive generated OpenSearch bootstrap password. It is unused while security is disabled; inheriting secured templates must set it with secret("onyx-opensearch-password").
+    opensearch-volume-name:
+      type: string
+      value: onyx-opensearch
+      description: Monk volume subdirectory used for OpenSearch index data.
+  containers:
+    node:
+      image: opensearchproject/opensearch
+      image-tag: <- $opensearch-image-tag
+      restart: unless-stopped
+      paths:
+        - <- `${volume-path}/${opensearch-volume-name}:/usr/share/opensearch/data`
+      ulimits:
+        nofile:
+          soft: 65536
+          hard: 65536
+        memlock:
+          soft: -1
+          hard: -1
+  services:
+    http-service:
+      container: node
+      port: 9200
+      protocol: tcp
+      publish: false
+      description: Private OpenSearch REST endpoint consumed by Onyx services.
+    rest-service:
+      container: node
+      port: 9600
+      protocol: tcp
+      publish: false
+      description: Private OpenSearch performance analyzer endpoint.
+  checks:
+    readiness:
+      attempts: 60
+      initialDelay: 20
+      period: 5
+      code: >-
+        <- `exec("node", "bash", "-lc", "curl -fsS http://127.0.0.1:9200 >/dev/null")`
+
+minio:
+  defines: runnable
+  inherits: minio/minio-server
+  metadata:
+    name: Onyx MinIO
+    description: |
+      Private S3-compatible object storage for Onyx file uploads in the standalone Standard stack. It is not published publicly. Inheriting production templates that need stable credentials must set onyx-s3-access-key and onyx-s3-secret-key with secret(...).
+    tags: onyx, minio, s3, object-storage, production
+    website: https://min.io/
+    source: https://github.com/minio/minio
+    publisher: monk.io
+    private: false
+  variables:
+    admin-username:
+      type: string
+      env: MINIO_ROOT_USER
+      value: onyxminio
+      description: Sensitive generated MinIO root username shared with Onyx as the S3 access key. Inheriting templates that need stable credentials must set this with secret("onyx-s3-access-key").
+    admin-password:
+      type: string
+      env: MINIO_ROOT_PASSWORD
+      value: 571da27b41744860af51a7ac2b534fcf
+      description: Sensitive generated MinIO root password shared with Onyx as the S3 secret key. Inheriting templates that need stable credentials must set this with secret("onyx-s3-secret-key").
+    api-port:
+      type: int
+      value: 9000
+      description: MinIO S3 API port inside the container.
+    console-port:
+      type: int
+      env: MINIO_CONSOLE_PORT
+      value: 9001
+      description: MinIO console port inside the container.
+  services:
+    api:
+      container: minio
+      port: <- $api-port
+      protocol: tcp
+      publish: false
+      description: Private MinIO S3 API endpoint consumed by Onyx services.
+    console:
+      container: minio
+      port: <- $console-port
+      protocol: tcp
+      publish: false
+      description: Private MinIO console endpoint.
+
+inference-model:
+  defines: runnable
+  inherits: onyx/model-server-base
+  metadata:
+    name: Onyx Inference Model Server
+    description: |
+      Private Onyx model server for local inference and embedding support in the Standard standalone stack.
+    tags: onyx, model-server, inference, embeddings, production
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    model-cache-volume-name:
+      type: string
+      value: onyx-inference-model-cache
+      description: Monk volume subdirectory used for the inference model cache.
+    model-log-volume-name:
+      type: string
+      value: onyx-inference-model-logs
+      description: Monk volume subdirectory used for inference model logs.
+
+indexing-model:
+  defines: runnable
+  inherits: onyx/model-server-base
+  metadata:
+    name: Onyx Indexing Model Server
+    description: |
+      Private Onyx indexing-only model server for document indexing in the Standard standalone stack.
+    tags: onyx, model-server, indexing, embeddings, production
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    indexing-only:
+      type: string
+      env: INDEXING_ONLY
+      value: "True"
+      description: Run this model server in indexing-only mode.
+    model-cache-volume-name:
+      type: string
+      value: onyx-indexing-model-cache
+      description: Monk volume subdirectory used for the indexing model cache.
+    model-log-volume-name:
+      type: string
+      value: onyx-indexing-model-logs
+      description: Monk volume subdirectory used for indexing model logs.
+
+api:
+  defines: runnable
+  inherits: onyx/api-base
+  metadata:
+    name: Onyx Standalone API
+    description: |
+      Production-intended Onyx API for the Standard standalone stack. It reads connection details from Monk-managed dependencies and keeps the API private behind the web service.
+    tags: onyx, api, rag, enterprise-search, production
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    user-auth-secret:
+      type: string
+      env: USER_AUTH_SECRET
+      value: 89a191f09035416dba7d9e52ae11c4d9
+      description: Sensitive generated auth signing secret. Inheriting production templates that need stable credentials must set this with secret("onyx-user-auth-secret").
+    postgres-host:
+      type: string
+      env: POSTGRES_HOST
+      value: <- connection-hostname("postgres")
+      description: PostgreSQL hostname read from the Monk postgres connection.
+    postgres-port:
+      type: int
+      env: POSTGRES_PORT
+      value: <- connection-port("postgres")
+      description: PostgreSQL port read from the Monk postgres connection.
+    postgres-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: 10a637f1a52840fb9d0914eea5ed872f
+      description: Sensitive generated PostgreSQL password shared with onyx/postgres.
+    disable-vector-db:
+      type: string
+      env: DISABLE_VECTOR_DB
+      value: "false"
+      description: Enable the Standard retrieval/indexing path.
+    cache-backend:
+      type: string
+      env: CACHE_BACKEND
+      value: redis
+      description: Use Redis as the Standard cache backend.
+    auth-backend:
+      type: string
+      env: AUTH_BACKEND
+      value: redis
+      description: Use Redis for auth state in the Standard stack.
+    file-store-backend:
+      type: string
+      env: FILE_STORE_BACKEND
+      value: s3
+      description: Use S3-compatible object storage for uploads.
+    redis-host:
+      type: string
+      env: REDIS_HOST
+      value: <- connection-hostname("redis")
+      description: Redis hostname read from the Monk redis connection.
+    redis-port:
+      type: int
+      env: REDIS_PORT
+      value: <- connection-port("redis")
+      description: Redis port read from the Monk redis connection.
+    redis-password:
+      type: string
+      env: REDIS_PASSWORD
+      value: 6fe31633100d41459da1b58fbe73b7af
+      description: Sensitive generated Redis password shared with onyx/redis.
+    opensearch-host:
+      type: string
+      env: OPENSEARCH_HOST
+      value: <- connection-hostname("opensearch")
+      description: OpenSearch hostname read from the Monk opensearch connection.
+    opensearch-port:
+      type: int
+      env: OPENSEARCH_REST_API_PORT
+      value: <- connection-port("opensearch")
+      description: OpenSearch REST port read from the Monk opensearch connection.
+    opensearch-admin-password:
+      type: string
+      env: OPENSEARCH_ADMIN_PASSWORD
+      value: 9d9fd67f3080435a9cd985988a080c5d
+      description: Sensitive generated OpenSearch admin password. It is unused while OpenSearch security is disabled.
+    model-server-host:
+      type: string
+      env: MODEL_SERVER_HOST
+      value: <- connection-hostname("inference-model")
+      description: Inference model server hostname read from the Monk connection.
+    indexing-model-server-host:
+      type: string
+      env: INDEXING_MODEL_SERVER_HOST
+      value: <- connection-hostname("indexing-model")
+      description: Indexing model server hostname read from the Monk connection.
+    minio-host:
+      type: string
+      value: <- connection-hostname("minio")
+      description: MinIO hostname read from the Monk minio connection.
+    minio-port:
+      type: int
+      value: <- connection-port("minio")
+      description: MinIO S3 API port read from the Monk minio connection.
+    s3-endpoint-url:
+      type: string
+      env: S3_ENDPOINT_URL
+      value: <- `http://${minio-host}:${minio-port}`
+      description: MinIO S3 endpoint URL built from the Monk minio connection.
+    s3-access-key:
+      type: string
+      env: S3_AWS_ACCESS_KEY_ID
+      value: onyxminio
+      description: Sensitive MinIO root username shared with Onyx as the S3 access key.
+    s3-secret-key:
+      type: string
+      env: S3_AWS_SECRET_ACCESS_KEY
+      value: 571da27b41744860af51a7ac2b534fcf
+      description: Sensitive MinIO root password shared with Onyx as the S3 secret key.
+  connections:
+    postgres:
+      target: onyx/postgres
+      service: postgres
+      description: Private PostgreSQL connection used by the Onyx API.
+    redis:
+      target: onyx/redis
+      service: redis
+      description: Private Redis connection used by the Onyx API.
+    opensearch:
+      target: onyx/opensearch
+      service: http-service
+      description: Private OpenSearch REST connection used by the Onyx API.
+    minio:
+      target: onyx/minio
+      service: api
+      description: Private MinIO S3 connection used by the Onyx API.
+    inference-model:
+      target: onyx/inference-model
+      service: model
+      description: Private inference model server connection used by the Onyx API.
+    indexing-model:
+      target: onyx/indexing-model
+      service: model
+      description: Private indexing model server connection used by the Onyx API.
+  depends:
+    wait-for:
+      runnables:
+        - onyx/postgres
+        - onyx/redis
+        - onyx/opensearch
+        - onyx/minio
+        - onyx/inference-model
+        - onyx/indexing-model
+      timeout: 1200
+
+api-local:
+  defines: runnable
+  inherits: onyx/api-base
+  metadata:
+    name: Onyx Standalone API Local
+    description: |
+      Local verification Onyx API flavor. It runs Lite mode against local PostgreSQL only so smoke tests do not require OpenSearch, Redis, MinIO, or model downloads.
+    tags: onyx, api, lite, postgresql, local
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    user-auth-secret:
+      type: string
+      env: USER_AUTH_SECRET
+      value: 5fb5ffb5b8d44d4e8954cf713498f3a7
+      description: Sensitive generated auth signing secret for local verification.
+    postgres-host:
+      type: string
+      env: POSTGRES_HOST
+      value: <- connection-hostname("postgres")
+      description: PostgreSQL hostname read from the local Monk postgres connection.
+    postgres-port:
+      type: int
+      env: POSTGRES_PORT
+      value: <- connection-port("postgres")
+      description: PostgreSQL port read from the local Monk postgres connection.
+    postgres-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: 7917bc9116ac4b84957e607b6a358fd1
+      description: Sensitive generated PostgreSQL password shared with onyx/postgres-local.
+    api-log-volume-name:
+      type: string
+      value: onyx-local-api-logs
+      description: Monk volume subdirectory used for local API logs.
+    file-system-volume-name:
+      type: string
+      value: onyx-local-file-system
+      description: Monk volume subdirectory used for local optional files.
+  connections:
+    postgres:
+      target: onyx/postgres-local
+      service: postgres
+      description: Local PostgreSQL connection used by the Onyx API.
+  depends:
+    wait-for:
+      runnables:
+        - onyx/postgres-local
+      timeout: 240
+
+web:
+  defines: runnable
+  inherits: onyx/web-base
+  metadata:
+    name: Onyx Standalone Web
+    description: |
+      Production-intended Onyx web UI. It connects to the private Onyx API and exposes only the authenticated web interface through Monk ingress.
+    tags: onyx, web, ai-chat, nextjs, production
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    api-host:
+      type: string
+      value: <- connection-hostname("api")
+      description: API hostname read from the Monk api connection.
+    api-service-port:
+      type: int
+      value: <- connection-port("api")
+      description: API port read from the Monk api connection.
+    internal-url:
+      type: string
+      env: INTERNAL_URL
+      value: <- `http://${api-host}:${api-service-port}`
+      description: Internal Onyx API URL built from the Monk api connection.
+  services:
+    http:
+      container: web
+      port: <- $web-port
+      protocol: tcp
+      ingress-routes:
+        web:
+          path-prefix: /
+      description: Authenticated Onyx web UI exposed through production ingress.
+  connections:
+    api:
+      target: onyx/api
+      service: api
+      description: Private Onyx API connection used by the web server.
+  depends:
+    wait-for:
+      runnables:
+        - onyx/api
+      timeout: 900
+
+web-local:
+  defines: runnable
+  inherits: onyx/web-base
+  metadata:
+    name: Onyx Standalone Web Local
+    description: |
+      Local verification Onyx web flavor. It connects to the local Lite API and publishes the web UI on a non-privileged host port because ingress is not available on local Monk targets.
+    tags: onyx, web, ai-chat, nextjs, local
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    api-host:
+      type: string
+      value: <- connection-hostname("api")
+      description: API hostname read from the local Monk api connection.
+    api-service-port:
+      type: int
+      value: <- connection-port("api")
+      description: API port read from the local Monk api connection.
+    internal-url:
+      type: string
+      env: INTERNAL_URL
+      value: <- `http://${api-host}:${api-service-port}`
+      description: Internal Onyx API URL built from the local Monk api connection.
+    local-host-port:
+      type: int
+      value: 18301
+      description: Non-privileged host port published by the local Onyx web UI.
+  services:
+    http:
+      container: web
+      port: <- $web-port
+      protocol: tcp
+      publish: true
+      host-port: <- $local-host-port
+      description: Published local Onyx web UI endpoint for external verification.
+  connections:
+    api:
+      target: onyx/api-local
+      service: api
+      description: Local Onyx API connection used by the web server.
+  depends:
+    wait-for:
+      runnables:
+        - onyx/api-local
+      timeout: 420
+
+background:
+  defines: runnable
+  inherits: onyx/background-base
+  metadata:
+    name: Onyx Standalone Background Workers
+    description: |
+      Production-intended Onyx background worker runnable for the Standard standalone stack. It connects to the same private dependencies as the API and remains unexposed.
+    tags: onyx, celery, workers, rag, enterprise-search, production
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  variables:
+    postgres-host:
+      type: string
+      env: POSTGRES_HOST
+      value: <- connection-hostname("postgres")
+      description: PostgreSQL hostname read from the Monk postgres connection.
+    postgres-port:
+      type: int
+      env: POSTGRES_PORT
+      value: <- connection-port("postgres")
+      description: PostgreSQL port read from the Monk postgres connection.
+    postgres-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: 10a637f1a52840fb9d0914eea5ed872f
+      description: Sensitive generated PostgreSQL password shared with onyx/postgres.
+    redis-host:
+      type: string
+      env: REDIS_HOST
+      value: <- connection-hostname("redis")
+      description: Redis hostname read from the Monk redis connection.
+    redis-port:
+      type: int
+      env: REDIS_PORT
+      value: <- connection-port("redis")
+      description: Redis port read from the Monk redis connection.
+    redis-password:
+      type: string
+      env: REDIS_PASSWORD
+      value: 6fe31633100d41459da1b58fbe73b7af
+      description: Sensitive generated Redis password shared with onyx/redis.
+    opensearch-host:
+      type: string
+      env: OPENSEARCH_HOST
+      value: <- connection-hostname("opensearch")
+      description: OpenSearch hostname read from the Monk opensearch connection.
+    opensearch-port:
+      type: int
+      env: OPENSEARCH_REST_API_PORT
+      value: <- connection-port("opensearch")
+      description: OpenSearch REST port read from the Monk opensearch connection.
+    opensearch-admin-password:
+      type: string
+      env: OPENSEARCH_ADMIN_PASSWORD
+      value: 9d9fd67f3080435a9cd985988a080c5d
+      description: Sensitive generated OpenSearch admin password. It is unused while OpenSearch security is disabled.
+    model-server-host:
+      type: string
+      env: MODEL_SERVER_HOST
+      value: <- connection-hostname("inference-model")
+      description: Inference model server hostname read from the Monk connection.
+    indexing-model-server-host:
+      type: string
+      env: INDEXING_MODEL_SERVER_HOST
+      value: <- connection-hostname("indexing-model")
+      description: Indexing model server hostname read from the Monk connection.
+    minio-host:
+      type: string
+      value: <- connection-hostname("minio")
+      description: MinIO hostname read from the Monk minio connection.
+    minio-port:
+      type: int
+      value: <- connection-port("minio")
+      description: MinIO S3 API port read from the Monk minio connection.
+    s3-endpoint-url:
+      type: string
+      env: S3_ENDPOINT_URL
+      value: <- `http://${minio-host}:${minio-port}`
+      description: MinIO S3 endpoint URL built from the Monk minio connection.
+    s3-access-key:
+      type: string
+      env: S3_AWS_ACCESS_KEY_ID
+      value: onyxminio
+      description: Sensitive MinIO root username shared with Onyx as the S3 access key.
+    s3-secret-key:
+      type: string
+      env: S3_AWS_SECRET_ACCESS_KEY
+      value: 571da27b41744860af51a7ac2b534fcf
+      description: Sensitive MinIO root password shared with Onyx as the S3 secret key.
+    api-server-host:
+      type: string
+      env: API_SERVER_HOST
+      value: <- connection-hostname("api")
+      description: API hostname read from the Monk api connection.
+  connections:
+    postgres:
+      target: onyx/postgres
+      service: postgres
+      description: Private PostgreSQL connection used by background workers.
+    redis:
+      target: onyx/redis
+      service: redis
+      description: Private Redis connection used by background workers.
+    opensearch:
+      target: onyx/opensearch
+      service: http-service
+      description: Private OpenSearch REST connection used by background workers.
+    minio:
+      target: onyx/minio
+      service: api
+      description: Private MinIO S3 connection used by background workers.
+    inference-model:
+      target: onyx/inference-model
+      service: model
+      description: Private inference model server connection used by background workers.
+    indexing-model:
+      target: onyx/indexing-model
+      service: model
+      description: Private indexing model server connection used by background workers.
+    api:
+      target: onyx/api
+      service: api
+      description: Private API connection used by worker integrations.
+  depends:
+    wait-for:
+      runnables:
+        - onyx/api
+        - onyx/postgres
+        - onyx/redis
+        - onyx/opensearch
+        - onyx/minio
+        - onyx/inference-model
+        - onyx/indexing-model
+      timeout: 1200
+
+stack:
+  defines: process-group
+  metadata:
+    name: Onyx Standalone Stack
+    description: |
+      Secure production-intended Onyx Standard stack with private PostgreSQL, Redis, OpenSearch, MinIO, local model servers, API, background workers, and a web UI exposed through Monk ingress. No dependency service is published publicly. Inheriting production templates that need stable credentials must replace generated sensitive values with secret(...) using plain secret names.
+    tags: onyx, ai-chat, rag, enterprise-search, standalone, production
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  runnable-list:
+    - onyx/postgres
+    - onyx/redis
+    - onyx/opensearch
+    - onyx/minio
+    - onyx/inference-model
+    - onyx/indexing-model
+    - onyx/api
+    - onyx/background
+    - onyx/web
+
+stack-local:
+  defines: process-group
+  metadata:
+    name: Onyx Standalone Local Stack
+    description: |
+      Local verification flavor of the Onyx standalone stack. It runs Onyx Lite mode with PostgreSQL, API, and web UI only, publishes the web UI on a non-privileged host port, and avoids ingress because ingress is not available on local Monk targets.
+    tags: onyx, ai-chat, lite, postgresql, standalone, local
+    website: https://onyx.app/
+    source: https://github.com/onyx-dot-app/onyx
+    publisher: monk.io
+    private: false
+  runnable-list:
+    - onyx/postgres-local
+    - onyx/api-local
+    - onyx/web-local

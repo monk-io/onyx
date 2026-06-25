@@ -1,0 +1,5 @@
+LOAD monk/onyx.yaml
+LOAD monk/onyx-example.yaml
+LOAD monk/onyx-stack.yaml
+
+ENTRY onyx/stack-local
