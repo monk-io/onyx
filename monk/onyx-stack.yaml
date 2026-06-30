@@ -80,10 +80,6 @@ redis:
       env: REDIS_PASSWORD
       value: 6fe31633100d41459da1b58fbe73b7af
       description: Sensitive generated Redis AUTH password shared by Onyx services. Inheriting templates that need stable credentials must set this with secret("onyx-redis-password").
-    redis-volume-name:
-      type: string
-      value: onyx-redis
-      description: Monk volume subdirectory used for Redis state.
   containers:
     redis:
       image: redis
@@ -93,8 +89,12 @@ redis:
         /bin/sh -ec '
         exec redis-server --port "$REDIS_PORT" --save "" --appendonly no --requirepass "$REDIS_PASSWORD"
         '
-      paths:
-        - <- `${volume-path}/${redis-volume-name}:/data`
+      mounted-volumes:
+        redis-data:
+          path: /data
+  volumes:
+    redis-data:
+      kind: local
   services:
     redis:
       container: redis
@@ -145,17 +145,14 @@ opensearch:
       env: OPENSEARCH_INITIAL_ADMIN_PASSWORD
       value: 9d9fd67f3080435a9cd985988a080c5d
       description: Sensitive generated OpenSearch bootstrap password. It is unused while security is disabled; inheriting secured templates must set it with secret("onyx-opensearch-password").
-    opensearch-volume-name:
-      type: string
-      value: onyx-opensearch
-      description: Monk volume subdirectory used for OpenSearch index data.
   containers:
     node:
       image: opensearchproject/opensearch
       image-tag: <- $opensearch-image-tag
       restart: unless-stopped
-      paths:
-        - <- `${volume-path}/${opensearch-volume-name}:/usr/share/opensearch/data`
+      mounted-volumes:
+        opensearch-data:
+          path: /usr/share/opensearch/data
       ulimits:
         nofile:
           soft: 65536
@@ -163,6 +160,9 @@ opensearch:
         memlock:
           soft: -1
           hard: -1
+  volumes:
+    opensearch-data:
+      kind: local
   services:
     http-service:
       container: node
@@ -242,15 +242,6 @@ inference-model:
     source: https://github.com/onyx-dot-app/onyx
     publisher: monk.io
     private: false
-  variables:
-    model-cache-volume-name:
-      type: string
-      value: onyx-inference-model-cache
-      description: Monk volume subdirectory used for the inference model cache.
-    model-log-volume-name:
-      type: string
-      value: onyx-inference-model-logs
-      description: Monk volume subdirectory used for inference model logs.
 
 indexing-model:
   defines: runnable
@@ -270,14 +261,6 @@ indexing-model:
       env: INDEXING_ONLY
       value: "True"
       description: Run this model server in indexing-only mode.
-    model-cache-volume-name:
-      type: string
-      value: onyx-indexing-model-cache
-      description: Monk volume subdirectory used for the indexing model cache.
-    model-log-volume-name:
-      type: string
-      value: onyx-indexing-model-logs
-      description: Monk volume subdirectory used for indexing model logs.
 
 api:
   defines: runnable
@@ -464,14 +447,6 @@ api-local:
       env: POSTGRES_PASSWORD
       value: 7917bc9116ac4b84957e607b6a358fd1
       description: Sensitive generated PostgreSQL password shared with onyx/postgres-local.
-    api-log-volume-name:
-      type: string
-      value: onyx-local-api-logs
-      description: Monk volume subdirectory used for local API logs.
-    file-system-volume-name:
-      type: string
-      value: onyx-local-file-system
-      description: Monk volume subdirectory used for local optional files.
   connections:
     postgres:
       target: onyx/postgres-local

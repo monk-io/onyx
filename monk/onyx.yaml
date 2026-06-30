@@ -161,14 +161,6 @@ api-base:
       env: LOG_LEVEL
       value: info
       description: Onyx backend log level.
-    api-log-volume-name:
-      type: string
-      value: onyx-api-logs
-      description: Monk volume subdirectory used for API logs.
-    file-system-volume-name:
-      type: string
-      value: onyx-file-system
-      description: Monk volume subdirectory used for optional filesystem-backed Onyx files.
   containers:
     api:
       image: onyxdotapp/onyx-backend
@@ -179,9 +171,16 @@ api-base:
         alembic upgrade head
         exec uvicorn onyx.main:app --host 0.0.0.0 --port "$API_PORT"
         '
-      paths:
-        - <- `${volume-path}/${api-log-volume-name}:/var/log/onyx`
-        - <- `${volume-path}/${file-system-volume-name}:/app/file-system`
+      mounted-volumes:
+        api-logs:
+          path: /var/log/onyx
+        file-system:
+          path: /app/file-system
+  volumes:
+    api-logs:
+      kind: local
+    file-system:
+      kind: local
   services:
     api:
       container: api
@@ -365,14 +364,6 @@ background-base:
       env: ENABLE_CRAFT
       value: "false"
       description: Whether to enable Onyx Craft worker behavior.
-    background-log-volume-name:
-      type: string
-      value: onyx-background-logs
-      description: Monk volume subdirectory used for background worker logs.
-    file-system-volume-name:
-      type: string
-      value: onyx-file-system
-      description: Monk volume subdirectory used for optional filesystem-backed Onyx files.
   containers:
     background:
       image: onyxdotapp/onyx-backend
@@ -382,9 +373,16 @@ background-base:
         /bin/sh -ec '
         exec /app/scripts/supervisord_entrypoint.sh
         '
-      paths:
-        - <- `${volume-path}/${background-log-volume-name}:/var/log/onyx`
-        - <- `${volume-path}/${file-system-volume-name}:/app/file-system`
+      mounted-volumes:
+        background-logs:
+          path: /var/log/onyx
+        file-system:
+          path: /app/file-system
+  volumes:
+    background-logs:
+      kind: local
+    file-system:
+      kind: local
 
 model-server-base:
   defines: runnable
@@ -412,14 +410,6 @@ model-server-base:
       env: INDEXING_ONLY
       value: "False"
       description: Set to True for the indexing-only model server.
-    model-cache-volume-name:
-      type: string
-      value: onyx-model-cache
-      description: Monk volume subdirectory used for Hugging Face model cache.
-    model-log-volume-name:
-      type: string
-      value: onyx-model-logs
-      description: Monk volume subdirectory used for model server logs.
   containers:
     model:
       image: onyxdotapp/onyx-model-server
@@ -429,9 +419,16 @@ model-server-base:
         /bin/sh -ec '
         exec uvicorn model_server.main:app --host 0.0.0.0 --port "$MODEL_SERVER_PORT"
         '
-      paths:
-        - <- `${volume-path}/${model-cache-volume-name}:/app/.cache/huggingface`
-        - <- `${volume-path}/${model-log-volume-name}:/var/log/onyx`
+      mounted-volumes:
+        model-cache:
+          path: /app/.cache/huggingface
+        model-logs:
+          path: /var/log/onyx
+  volumes:
+    model-cache:
+      kind: local
+    model-logs:
+      kind: local
   services:
     model:
       container: model

@@ -68,14 +68,6 @@ example-api:
       env: POSTGRES_PASSWORD
       value: 87a01b463fed4851bb8a5ee864707da0
       description: Sensitive generated PostgreSQL password shared with the component example database.
-    api-log-volume-name:
-      type: string
-      value: onyx-example-api-logs
-      description: Monk volume subdirectory used for component example API logs.
-    file-system-volume-name:
-      type: string
-      value: onyx-example-file-system
-      description: Monk volume subdirectory used for component example optional files.
   connections:
     postgres:
       target: onyx/example-postgres
