@@ -114,7 +114,6 @@ example-web:
       container: web
       port: <- $web-port
       protocol: tcp
-      publish: true
       host-port: <- $example-host-port
       description: Published local Onyx web UI endpoint for component example verification.
   connections:
