@@ -539,6 +539,7 @@ web-local:
       container: web
       port: <- $web-port
       protocol: tcp
+      publish: true
       host-port: <- $local-host-port
       description: Published local Onyx web UI endpoint for external verification.
   connections:
