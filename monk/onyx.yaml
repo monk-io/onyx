@@ -5,7 +5,7 @@ api-base:
   metadata:
     name: Onyx API
     description: |
-      Reusable Onyx API component. It runs the public onyxdotapp/onyx-backend image and expects inheriting templates to provide PostgreSQL connection details. Standard RAG deployments also need OpenSearch, Redis, and object storage connections; use the self-hosted postgresql/db-v15, opensearch/single-node, redis/redis, and minio/minio-server packages or compatible hosted services when inheriting this runnable.
+      Reusable Onyx API component. It runs the public onyxdotapp/onyx-backend image and expects inheriting templates to provide PostgreSQL connection details. Standard RAG deployments also need OpenSearch, Redis, and object storage connections; use the self-hosted postgresql/db-v15, opensearch/single-node, redis/redis, and minio/base packages or compatible hosted services when inheriting this runnable.
     tags: onyx, ai-chat, rag, enterprise-search, api, component
     website: https://onyx.app/
     source: https://github.com/onyx-dot-app/onyx
