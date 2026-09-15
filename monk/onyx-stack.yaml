@@ -186,7 +186,7 @@ opensearch:
 
 minio:
   defines: runnable
-  inherits: minio/minio-server
+  inherits: minio/base
   metadata:
     name: Onyx MinIO
     description: |
@@ -197,21 +197,21 @@ minio:
     publisher: monk.io
     private: false
   variables:
-    admin-username:
+    minio-root-user:
       type: string
       env: MINIO_ROOT_USER
       value: onyxminio
       description: Sensitive generated MinIO root username shared with Onyx as the S3 access key. Inheriting templates that need stable credentials must set this with secret("onyx-s3-access-key").
-    admin-password:
+    minio-root-password:
       type: string
       env: MINIO_ROOT_PASSWORD
       value: 571da27b41744860af51a7ac2b534fcf
       description: Sensitive generated MinIO root password shared with Onyx as the S3 secret key. Inheriting templates that need stable credentials must set this with secret("onyx-s3-secret-key").
-    api-port:
+    minio-api-port:
       type: int
       value: 9000
       description: MinIO S3 API port inside the container.
-    console-port:
+    minio-console-port:
       type: int
       env: MINIO_CONSOLE_PORT
       value: 9001
@@ -219,13 +219,13 @@ minio:
   services:
     api:
       container: minio
-      port: <- $api-port
+      port: <- $minio-api-port
       protocol: tcp
       publish: false
       description: Private MinIO S3 API endpoint consumed by Onyx services.
     console:
       container: minio
-      port: <- $console-port
+      port: <- $minio-console-port
       protocol: tcp
       publish: false
       description: Private MinIO console endpoint.
